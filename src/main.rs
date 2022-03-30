@@ -294,6 +294,23 @@ macro_rules! summary {
     }};
 }
 
+async fn get_detail<'event, 'args: 'event, 'client: 'args>(
+    client: &'client SentryClient,
+    organization_slug: &'args str,
+    project_slug: &'args str,
+    event: Result<Event>,
+) -> Result<EventDetail> {
+    match event {
+        Ok(event) => {
+            client
+                .event_full(organization_slug, project_slug, event.event_id)
+                .and_then(extract_detail)
+                .await
+        }
+        Err(e) => Err(e),
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
@@ -313,16 +330,11 @@ async fn main() -> Result<()> {
         .await?;
     let events: Vec<EventDetail> = client
         .project_events(&project.organization.slug, &project.slug)
-        .map(|v| v.expect("bad"))
-        .map(|event| {
-            client
-                .event_full(&project.organization.slug, &project.slug, event.event_id)
-                .and_then(extract_detail)
-        })
+        .map(|event| get_detail(&client, &args.organization_slug, &args.project_slug, event))
         .buffer_unordered(30)
         .enumerate()
         .inspect(|(i, _)| {
-            write!(stdout, "fetching {}", i).ok();
+            write!(stdout, "\rfetching {}", i).ok();
             stdout.flush().ok();
         })
         .map(|(_, v)| v)
